@@ -1,0 +1,111 @@
+---
+title: "Assignment Practical Machine Learning"
+date: "21. November 2015"
+output: html_document
+---
+
+# Introduction
+
+The goal of the analysis is to predict the style in which barbell lifts were performed and to predict
+20 different test cases. The analysis is based on personal activity data of six individuals collected 
+by fitness devices like Fitbit or Nike FuelBand. The participants performed the barbell lifts in five
+different styles -- one correct and four incorrect ways. The data is provided by Velloso, Bulling, Gellersen, Ugulino and Fuks (2013).
+
+# Model and Resampling
+
+Decision trees are a first candidate for a classification task. However, decision trees tend to overfitting. Random forests are an ensemble learning method that construct different decision trees and thereby provide higher classification accuracy. Random forests correct for decision trees tendency of overfitting. In addition to that, random forests do not require preprocessing of data (e.g. scaling or normalising). These advantages come at the cost of lower interpretability.
+
+The original training data is split into a training (60% percent of the observations) and a test data set. 
+I apply repeated 10-fold cross validation in order to estimate the model performance. This means that the training data is divided into 10 separate random samples, where the model is built on 90 percent of the observations and evaluated on 10 percent of the data each time. This process is repeated five times (5 repetitions of 10-fold cross validation) in order to increase the robustness of the measurements. Finally, the overall performance is obtained by averaging the individual performance measures.
+
+# Analysis
+
+The analyis uses the *caret* package for model training and evaluation. In addition, the *doParallel* package is applied in order to enable parallel computation.
+```{r, message=FALSE}
+library(caret)
+library(doParallel)
+
+cl <- makeCluster(detectCores(), type='PSOCK')
+registerDoParallel(cl)
+```
+Next, I set the working directory and load the initial test and training data set.
+```{r, cache=TRUE}
+wd <- paste0("D:/Benutzer-Profile/marc-andre.nehrkorn-/Documents/_R/",
+             "Course 8 - Practical Machine Learning/assignment")
+setwd(wd)
+    
+test.orig  <- read.table(file = "pml-testing.csv",                # this is for prediction
+                         header = TRUE,
+                         sep = ",", 
+                         dec = ".",
+                         na.strings = c("NA", "#DIV/0!", ""),
+                         as.is=TRUE)                                  
+train.orig <- read.table(file = "pml-training.csv",               # this is for training
+                         header = TRUE, 
+                         sep = ",", 
+                         dec = ".",
+                         as.is=TRUE,
+                         na.strings = c("NA", "#DIV/0!", ""))
+```
+In order to facilitate computation, I drop those features that exhibit a substantial number of missing values (although these might be useful for prediction as well). Additionally, I drop index and time stamp columns.
+```{r, cache=TRUE}
+na.count <- apply(train.orig, 2, function(x) sum(is.na(x)))
+na.list <- ifelse(na.count>19000, 0, 1)
+
+train.mod.orig <- train.orig[, na.list==1]
+test.mod.orig <- test.orig[, na.list==1]
+
+train.mod.orig <- train.mod.orig[, -c(1:7)]
+test.mod.orig <- test.mod.orig[, -c(1:7)]
+```
+As mentioned above, the initial training data set is split into a training and a test data set.
+```{r, cache=TRUE}
+inTrain <- createDataPartition(y = train.mod.orig$classe,
+                               p = 0.6,
+                               list = FALSE)
+
+training <- train.mod.orig[inTrain,]
+testing  <- train.mod.orig[-inTrain,]
+```
+The following histogram shows that there is substantial variation in exercise styles.
+```{r, cache=TRUE}
+qplot(classe, 
+      data = train.orig,
+      geom = "histogram",
+      main = "Distribution of Excercise Styles",
+      xlab = "Exercise Styles")
+```
+
+Next, a random forest with five times repeated 10-fold cross validation is fitted.
+```{r, cache=TRUE}
+ctrl <- trainControl(method = "repeatedcv",
+                     repeats = 5,
+                     number = 10)
+
+set.seed(123)
+modelFit <- train(classe ~ ., 
+                  data = training, 
+                  method = "rf",
+                  trControl = ctrl,
+                  prox=TRUE)
+```
+```{r, cache=TRUE}
+modelFit
+plot(modelFit)
+```
+
+The final output shows that the classification accuracy on the training data is pretty high. According to accuracy a model with 27 features randomly selected at each split provides the highest accuracy (0.99) among the candidates. However, the final evaluation is performed using the test data set which contains 40 percent of the observations of the original training data, because the in sample error tends to be too optimistic and the out of sample error is supposed provide a more realistic assessment of model performance (in particular it supposed to be lower then the in sample error).
+
+```{r, cache=TRUE}
+modelClasses <- predict(modelFit,
+                        newdata = testing)        
+        
+confusionMatrix(data = modelClasses,                        
+                testing$classe)
+```
+
+The confusion matrix shows that some exercises have been misclassified but that the overall (out of sample) accuracy is still pretty high (0.99). The results might be further improved by allowing for more than three values of the tuning parameter.
+
+# Sources
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
